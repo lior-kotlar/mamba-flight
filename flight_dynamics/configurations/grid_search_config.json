@@ -1,0 +1,14 @@
+{
+    "epochs": 100,
+    "batch_size": [32, 64],
+    "lr": [1e-3, 1e-4],
+    "weight_decay": [0.01, 0.1],
+    "num_workers": 4,
+    "d_model": [512, 1024],
+    "n_layers": [4, 5],
+    "features_file": "../asl/Data/train_datasets/train_input_forces_clean.pt",
+    "targets_file": "../asl/Data/train_datasets/train_output_kinematics_clean.pt",
+    "train_split_ratio": 0.85,
+    "feature_normalizer": "vectornorm",
+    "target_normalizer": "identity"
+}
