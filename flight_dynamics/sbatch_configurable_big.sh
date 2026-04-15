@@ -4,7 +4,7 @@
 #SBATCH -e flight_dynamics/logs/%x_%J.err
 #SBATCH --mem=128g
 #SBATCH --cpus-per-task=8
-#SBATCH --time=8:00:00
+#SBATCH --time=08:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --exclude=catfish-[01-05],salmon-[01-10]
 #SBATCH --mail-user=lior.kotlar@mail.huji.ac.il
