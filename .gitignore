@@ -209,3 +209,4 @@ __marimo__/
 .vscode/
 flight_dynamics/logs/
 flight_dynamics/runs/
+flight_dynamics/data/

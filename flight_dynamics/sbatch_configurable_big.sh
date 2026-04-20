@@ -1,41 +1,47 @@
 #!/bin/bash
-#SBATCH --job-name=s4_flight_training
+#SBATCH --job-name=mamba_flight_training
 #SBATCH -o flight_dynamics/logs/%x_%J.out
 #SBATCH -e flight_dynamics/logs/%x_%J.err
-#SBATCH --mem=128g
+#SBATCH --mem=64g
 #SBATCH --cpus-per-task=8
 #SBATCH --time=08:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --exclude=catfish-[01-05],salmon-[01-10]
+#SBATCH --partition=salmon
 #SBATCH --mail-user=lior.kotlar@mail.huji.ac.il
 #SBATCH --mail-type=END,FAIL
 
-# Usage: sbatch -J <EXPERIMENT_NAME> sbatch_configurable.sh <CONFIG_PATH>
-CONFIG_PATH=$1
-
-# Safety checks
-if [ -z "$CONFIG_PATH" ]; then
-  echo "Error: No config file path provided."
-  echo "Usage: sbatch -J <EXPERIMENT_NAME> sbatch_configurable.sh path/to/config.json"
-  exit 1
-fi
+# Capture the flag type (--config or --resume_dir) and the path provided
+FLAG=$1
+PATH_ARG=$2
 
 # Automatically grab the job name provided via the -J flag
 EXPERIMENT_NAME=$SLURM_JOB_NAME
 
-echo "started"
+# Safety checks and routing logic
+if [ "$FLAG" == "--config" ] && [ -n "$PATH_ARG" ]; then
+  RUN_MODE="FRESH"
+  PYTHON_ARGS="--config $PATH_ARG --name $EXPERIMENT_NAME"
+elif [ "$FLAG" == "--resume_dir" ] && [ -n "$PATH_ARG" ]; then
+  RUN_MODE="RESUME"
+  PYTHON_ARGS="--resume_dir $PATH_ARG"
+else
+  echo "Error: Invalid or missing arguments."
+  echo "Usage for a NEW run: sbatch -J <EXPERIMENT_NAME> sbatch_configurable.sh --config path/to/config.json"
+  echo "Usage to RESUME:     sbatch -J <EXPERIMENT_NAME> sbatch_configurable.sh --resume_dir path/to/run_directory"
+  exit 1
+fi
 
-# Navigate to the correct S4 workspace
+echo "Job started on $(hostname) at $(date)"
+echo "Run Mode: $RUN_MODE"
+echo "GPUs allocated: $CUDA_VISIBLE_DEVICES"
+echo "Experiment Name: $EXPERIMENT_NAME"
+echo "Executing Python script with args: $PYTHON_ARGS"
+
+# Navigate to the correct workspace
 cd /cs/labs/tsevi/lior.kotlar/mamba-flight
 source .env/bin/activate
 
-echo "Job started on $(hostname)"
-echo "GPUs allocated: $CUDA_VISIBLE_DEVICES"
-echo "Config File: $CONFIG_PATH"
-echo "Experiment Name: $EXPERIMENT_NAME"
+# Execute the python script with the dynamically mapped flags
+python flight_dynamics/main_flight.py $PYTHON_ARGS
 
-# Execute the python script with the mapped flags
-# Adjust "flight_map/train.py" to your exact python script filename if different
-python flight_dynamics/main_flight.py --config "$CONFIG_PATH" --name "$EXPERIMENT_NAME"
-
-echo "finished working"
+echo "Finished working at $(date)"

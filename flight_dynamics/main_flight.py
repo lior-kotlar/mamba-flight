@@ -118,25 +118,33 @@ def setup_optimizer(model, lr, weight_decay, epochs):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
     return optimizer, scheduler
 
-def train_epoch(epoch, model, dataloader, optimizer, device, disable_tqdm=False):
+def train_epoch(epoch, model, dataloader, optimizer, device, disable_tqdm=False, accumulation_steps=1):
     model.train()
     train_loss = 0
     pbar = tqdm(enumerate(dataloader), total=len(dataloader), leave=False, disable=disable_tqdm)
     
+    # Move zero_grad outside the loop so we start fresh
+    optimizer.zero_grad()
+    
     for batch_idx, (inputs, targets, mask) in pbar:
         inputs, targets, mask = inputs.to(device, dtype=torch.float32), targets.to(device, dtype=torch.float32), mask.to(device, dtype=torch.float32)
-        optimizer.zero_grad()
+        
         outputs = model(inputs)
         
         loss_unreduced = F.mse_loss(outputs, targets, reduction='none').mean(dim=-1) 
         masked_loss = loss_unreduced * mask
         loss = masked_loss.sum() / mask.sum()
+        
+        loss = loss / accumulation_steps
+        
         loss.backward()
         
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
+        if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(dataloader):
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad() # Reset for the next accumulation cycle
 
-        train_loss += loss.item()
+        train_loss += loss.item() * accumulation_steps
         pbar.set_description(f'Train Epoch: {epoch} | Masked MSE: {train_loss/(batch_idx+1):.4f}')
 
 def evaluate(epoch, model, dataloader, device, is_val=True, disable_tqdm=False):
@@ -164,6 +172,8 @@ def run_training_pipeline(config, X_train, y_train, X_val, y_val, current_instan
     
     EPOCHS, BATCH_SIZE, LR, WEIGHT_DECAY = config["epochs"], config["batch_size"], config["lr"], config["weight_decay"]
     NUM_WORKERS, D_MODEL, N_LAYERS = config["num_workers"], config["d_model"], config["n_layers"]
+
+    ACCUMULATION_STEPS = config.get("accumulation_steps", 1)
     
     with open(os.path.join(current_instance_dir, 'config.json'), 'w') as f:
         json.dump(config, f, indent=4)
@@ -204,9 +214,9 @@ def run_training_pipeline(config, X_train, y_train, X_val, y_val, current_instan
         model.load_state_dict(ckpt['model_state_dict'])
         optimizer.load_state_dict(ckpt['optimizer_state_dict'])
         scheduler.load_state_dict(ckpt['scheduler_state_dict'])
-        torch.set_rng_state(ckpt['rng_state'])
-        if 'cuda_rng_state' in ckpt and device == 'cuda':
-            torch.cuda.set_rng_state(ckpt['cuda_rng_state'])
+        torch.set_rng_state(ckpt['rng_state'].cpu())
+        if 'cuda_rng_state' in ckpt and ckpt['cuda_rng_state'] is not None and device == 'cuda':
+            torch.cuda.set_rng_state(ckpt['cuda_rng_state'].cpu())
             
         start_epoch = ckpt['epoch'] + 1
         best_val_loss = ckpt['best_val_loss']
@@ -214,7 +224,7 @@ def run_training_pipeline(config, X_train, y_train, X_val, y_val, current_instan
 
     print(f"[{run_label}] Starting Training Loop...")
     for epoch in range(start_epoch, EPOCHS + 1):
-        train_epoch(epoch, model, trainloader, optimizer, device, disable_tqdm=disable_tqdm)
+        train_epoch(epoch, model, trainloader, optimizer, device, disable_tqdm=disable_tqdm, accumulation_steps=ACCUMULATION_STEPS)
         val_loss = evaluate(epoch, model, valloader, device, is_val=True, disable_tqdm=disable_tqdm)
         scheduler.step()
         
